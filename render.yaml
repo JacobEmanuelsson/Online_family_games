@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: yatzy-club
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+      - key: CYPRESS_INSTALL_BINARY
+        value: "0"

@@ -1,0 +1,15 @@
+# Set YATZY_DOMAIN to your DNS name and YATZY_DIST to the absolute built dist directory.
+{$YATZY_DOMAIN} {
+    header Strict-Transport-Security "max-age=31536000"
+    handle /socket.io/* {
+        reverse_proxy 127.0.0.1:3000 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto https
+        }
+    }
+    handle {
+        root * {$YATZY_DIST}
+        try_files {path} /index.html
+        file_server
+    }
+}

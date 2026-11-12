@@ -1,0 +1,25 @@
+name: Pre-merge security
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+permissions:
+  contents: read
+jobs:
+  security-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CYPRESS_INSTALL_BINARY: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run build
+      - run: npm run test:unit -- --run

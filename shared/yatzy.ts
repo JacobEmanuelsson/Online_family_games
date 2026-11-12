@@ -38,3 +38,17 @@ export type GameState = {
   rollsLeft: number
   finished: boolean
 }
+
+export type RoomSnapshot = {
+  code: string
+  players: Player[]
+  hostId: string
+  onlineIds: string[]
+  game: GameState | null
+  version: number
+  message: string
+  totals: Record<string, number>
+  bonuses: Record<string, number>
+  previews: Record<Category, number>
+  winnerIds: string[]
+}

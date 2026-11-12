@@ -67,12 +67,20 @@ export function chooseCategory(state: GameState, category: Category): GameState 
   }
 
   const currentPlayer = state.players[state.currentPlayerIndex]
+
+  if (!currentPlayer) {
+    throw new Error('Current player was not found')
+  }
+
   const scoreCard = state.scorecards[currentPlayer.id]
+
+  if (!scoreCard) {
+    throw new Error('Current player has no scorecard')
+  }
 
   if (scoreCard[category] !== null) {
     throw new Error('Cannot pick the same category')
   }
-  scoreCard[category]
 
   const points = calculateScore(state.dice, category)
   const newScorecard = { ...scoreCard, [category]: points }
@@ -100,4 +108,42 @@ export function upperBonus(scorecard: Scorecard): number {
     return 50
   }
   return 0
+}
+
+export function totalScore(scorecard: Scorecard): number {
+  let total = 0
+
+  for (const category of categories) {
+    total += scorecard[category] ?? 0
+  }
+
+  return total + upperBonus(scorecard)
+}
+
+export function getWinners(state: GameState): Player[] {
+  if (!state.finished) {
+    throw new Error('Game is not finished')
+  }
+
+  let highestScore = -1
+  let winners: Player[] = []
+
+  for (const player of state.players) {
+    const scorecard = state.scorecards[player.id]
+
+    if (!scorecard) {
+      throw new Error('Player has no scorecard')
+    }
+
+    const score = totalScore(scorecard)
+
+    if (score > highestScore) {
+      highestScore = score
+      winners = [player]
+    } else if (score === highestScore) {
+      winners.push(player)
+    }
+  }
+
+  return winners
 }
