@@ -2,8 +2,9 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { io } from 'socket.io-client'
 import Die from './components/Die.vue'
-import { categories, type Category, type GameState, type RoomSnapshot } from '../shared/yatzy'
+import { categories, type Category, type GameState, type HighScore, type RoomSnapshot } from '../shared/yatzy'
 
+const highScores = ref<HighScore[] | null>(null)
 const connected = ref(false)
 const playerName = ref('')
 const room = ref<RoomSnapshot | null>(null)
@@ -14,6 +15,20 @@ const errorMessage = ref('')
 const busy = ref(false)
 const copied = ref(false)
 const held = ref<GameState['held']>([false, false, false, false, false])
+const reviewRoll = ref(false)
+const confirmRerolls = ref(true)
+function setConfirmation(enabled: boolean) {
+  confirmRerolls.value = enabled
+  try { localStorage.setItem('yatzy.confirmRerolls', String(enabled)) } catch { /* Session only. */ }
+}
+function requestRoll() {
+  if (game.value?.rollsLeft === 3 || !confirmRerolls.value) act('roll', [...held.value])
+  else reviewRoll.value = true
+}
+function confirmRoll() {
+  reviewRoll.value = false
+  act('roll', [...held.value])
+}
 const zeroCategory = ref<Category | null>(null)
 const showInvite = ref(false)
 let autoJoin = false
@@ -106,6 +121,7 @@ function acceptRoom(data: RoomSnapshot) {
     old.rollsLeft !== next.rollsLeft ||
     old.finished !== next.finished
   ) {
+    reviewRoll.value = false
     held.value = next ? [...next.held] : [false, false, false, false, false]
     zeroCategory.value = null
   }
@@ -171,6 +187,7 @@ function toggleDie(index: number) {
   if (canScore.value && !zeroCategory.value) held.value[index] = !held.value[index]
 }
 function choose(category: Category) {
+  reviewRoll.value = false
   if (!canScore.value) return
   if (room.value?.previews[category] === 0) zeroCategory.value = category
   else act('score', category)
@@ -188,6 +205,7 @@ async function copyLink() {
     errorMessage.value = 'Select and copy the invite link below.'
   }
 }
+socket.on('leaderboard:updated', (scores: HighScore[]) => { highScores.value = scores })
 socket.on('session:ready', ({ playerId }: { playerId: string }) => {
   me.value = playerId
 })
@@ -203,6 +221,7 @@ socket.on('connect', () => {
   }
 })
 socket.on('disconnect', (reason: string) => {
+  reviewRoll.value = false
   connected.value = false
   busy.value = false
   requestNumber++
@@ -218,6 +237,7 @@ socket.on('connect_error', () => {
   errorMessage.value = 'Cannot reach the game server. Make sure it is running.'
 })
 onMounted(() => {
+  try { confirmRerolls.value = localStorage.getItem('yatzy.confirmRerolls') !== 'false' } catch { /* Keep default. */ }
   let token: string | null = null
   try {
     token = sessionStorage.getItem('yatzy.session')
@@ -259,6 +279,7 @@ onUnmounted(() => {
       <details class="rules">
         <summary>How to play</summary>
         <div>
+          <label class="reroll-pref"><input type="checkbox" :checked="confirmRerolls" @change="setConfirmation(($event.target as HTMLInputElement).checked)" /> Confirm before rerolling</label>
           <h3>A quick refresher</h3>
           <p>
             Roll up to three times per turn. Tap dice to hold them. Choose an unused category to
@@ -516,7 +537,7 @@ onUnmounted(() => {
               />
             </div>
             <button
-              class="roll-button"
+              v-if="!reviewRoll" class="roll-button"
               :disabled="
                 !myTurn ||
                 busy ||
@@ -524,7 +545,7 @@ onUnmounted(() => {
                 (game.rollsLeft < 3 && held.every(Boolean)) ||
                 !!zeroCategory
               "
-              @click="act('roll', held)"
+              @click="requestRoll"
             >
               {{
                 busy
@@ -537,6 +558,13 @@ onUnmounted(() => {
               }}
               <span aria-hidden="true">&rarr;</span>
             </button>
+            <div v-else class="zero-confirm" role="group" aria-label="Review dice before rerolling" @keydown.esc="reviewRoll = false">
+              <strong>Check your dice</strong>
+              <p>Keep: {{ game.dice.filter((_, i) => held[i]).join(', ') || 'none' }} · Reroll: {{ game.dice.filter((_, i) => !held[i]).join(', ') }}</p>
+              <button @click="reviewRoll = false">Change dice</button>
+              <button @click="confirmRoll">Confirm reroll</button>
+              <label class="reroll-pref"><input type="checkbox" :checked="!confirmRerolls" @change="setConfirmation(!($event.target as HTMLInputElement).checked)" /> Don’t ask again</label>
+            </div>
             <p class="rolls-left">
               {{ game.rollsLeft }} {{ game.rollsLeft === 1 ? 'roll' : 'rolls' }} remaining
             </p>
@@ -630,6 +658,15 @@ onUnmounted(() => {
         {{ errorMessage
         }}<button aria-label="Dismiss error" @click="errorMessage = ''">&times;</button>
       </div>
+      <section class="global-scores panel" aria-labelledby="high-scores">
+        <h2 id="high-scores">Top 5 scores</h2>
+        <p class="muted">Highest individual scores from completed games across all rooms.</p>
+        <p v-if="!highScores" role="status">Waiting for the scoreboard…</p>
+        <p v-else-if="!highScores.length">Finish a game to set the first score.</p>
+        <ol v-else>
+          <li v-for="(entry,i) in highScores" :key="i"><span>{{ entry.name }}</span><strong>{{ entry.points }} pts</strong></li>
+        </ol>
+      </section>
     </main>
     <footer>
       <span>yatzy club</span><span>Less scrolling. More rolling.</span
@@ -1453,4 +1490,10 @@ footer > span:first-child {
     transition: none !important;
   }
 }
+.global-scores { margin: 24px auto 0; padding: 24px; max-width: 660px; }
+.global-scores ol { padding-left: 2rem; }
+.global-scores li { padding: .6rem; border-bottom: 1px solid #dee5d8; }
+.global-scores li strong { float: right; }
+.reroll-pref { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: 12px; }
+.reroll-pref input { width: auto; }
 </style>

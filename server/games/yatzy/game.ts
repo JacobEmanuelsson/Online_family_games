@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto'
 import { categories } from '../../../shared/yatzy'
 import type { DieValue, GameState, Player, Scorecard, Dice, Category } from '../../../shared/yatzy'
 import { calculateScore } from './scoring'
@@ -46,7 +47,7 @@ export function rollDice(state: GameState, held: GameState['held']): GameState {
   const newHeld: GameState['held'] = isFirstRoll ? [false, false, false, false, false] : held
 
   const newDice = state.dice.map((die, i) =>
-    newHeld[i] ? die : ((Math.floor(Math.random() * 6) + 1) as DieValue),
+    newHeld[i] ? die : (randomInt(1, 7) as DieValue),
   ) as Dice
 
   return {

@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 import {
   categories,
   type Category,
@@ -26,6 +26,9 @@ type Room = {
   message: string
 }
 const rooms = new Map<string, Room>()
+const matchIds = new WeakMap<Room, string>()
+const saving = new WeakSet<Room>()
+const pendingFinal = new WeakMap<Room, { category: Category; game: GameState }>()
 const expiry = new Map<string, ReturnType<typeof setTimeout>>()
 function requireRoom(code: string): Room {
   const room = rooms.get(code)
@@ -109,15 +112,20 @@ export function snapshot(room: Room): RoomSnapshot {
     winnerIds: game?.finished ? getWinners(game).map((p) => p.id) : [],
   }
 }
-export function gameAction(
+export async function gameAction(
   code: string,
   playerId: string,
   action: string,
   version: unknown,
-  value?: unknown,
-): Room {
+  value: unknown,
+  record: (matchId: string, code: string, game: GameState) => Promise<void>,
+): Promise<Room> {
   const room = requireRoom(code)
   if (!room.onlineIds.includes(playerId)) throw new Error('Join this room before playing.')
+  if (saving.has(room)) throw new Error('Saving the final score. Please wait.')
+  const pending = pendingFinal.get(room)
+  if (pending && (action !== 'score' || value !== pending.category))
+    throw new Error('Retry the last category to save the finished match.')
   if (version !== room.version) throw new Error('The table changed. Please try again.')
   if (action === 'start' || action === 'rematch') {
     if (room.hostId !== playerId) throw new Error('Only the host can start a game.')
@@ -126,6 +134,7 @@ export function gameAction(
     if (room.players.length < 2) throw new Error('Invite at least one friend to start.')
     if (room.onlineIds.length !== room.players.length)
       throw new Error('Wait for every player to reconnect before starting.')
+    matchIds.set(room, randomUUID())
     room.game = createGame(room.players.map((p) => ({ ...p })))
     room.message = 'A fresh scorecard. Good luck!'
   } else {
@@ -142,7 +151,21 @@ export function gameAction(
       room.message = `${current.name} rolled the dice.`
     } else if (action === 'score') {
       if (!categories.includes(value as Category)) throw new Error('Invalid category.')
-      room.game = chooseCategory(game, value as Category)
+      const category = value as Category
+      const next = pending?.game ?? chooseCategory(game, category)
+      if (next.finished) {
+        pendingFinal.set(room, { category, game: next })
+        saving.add(room)
+        try {
+          await record(matchIds.get(room)!, code, next)
+          pendingFinal.delete(room)
+        } catch {
+          throw new Error('Could not save the match. Select the same category to retry.')
+        } finally {
+          saving.delete(room)
+        }
+      }
+      room.game = next
       room.message = `${current.name} scored ${room.game.scorecards[current.id]![value as Category]} points.`
     } else throw new Error('Unknown game action.')
   }

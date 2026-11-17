@@ -39,6 +39,8 @@ export type GameState = {
   finished: boolean
 }
 
+export type HighScore = { name: string; points: number }
+
 export type RoomSnapshot = {
   code: string
   players: Player[]

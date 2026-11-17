@@ -129,7 +129,15 @@ it('starts, holds dice, confirms zero scores, and displays results with a rematc
   mock.socket.emit.mock.calls.at(-1)!.at(-1)(null, state)
   await flushPromises()
   await wrapper.get('[aria-label="Die 1: 1, not held"]').trigger('click')
+  const rollsBeforeReview = mock.socket.emit.mock.calls.length
   await button('Roll again').trigger('click')
+  expect(wrapper.text()).toContain('Keep: 1 · Reroll: 2, 3, 4, 5')
+  await button('Change dice').trigger('click')
+  expect(mock.socket.emit.mock.calls.length).toBe(rollsBeforeReview)
+  await button('Roll again').trigger('click')
+  await wrapper.get('.zero-confirm input').setValue(true)
+  expect(localStorage.getItem('yatzy.confirmRerolls')).toBe('false')
+  await button('Confirm reroll').trigger('click')
   expect(mock.socket.emit.mock.calls.at(-1)![1].value).toEqual([true, false, false, false, false])
   mock.socket.emit.mock.calls.at(-1)!.at(-1)(null, { ...state, version: 4 })
   await flushPromises()
@@ -154,4 +162,28 @@ it('starts, holds dice, confirms zero scores, and displays results with a rematc
   expect(wrapper.get('[data-testid="results"]').text()).toContain('Alice & Bob')
   await button('Play again').trigger('click')
   expect(mock.socket.emit.mock.calls.at(-1)![0]).toBe('game:rematch')
+})
+it('shows empty and populated global standings', async () => {
+  wrapper = mount(App)
+  mock.handlers['leaderboard:updated']!([])
+  await flushPromises()
+  expect(wrapper.get('.global-scores').text()).toContain('Finish a game')
+  mock.handlers['leaderboard:updated']!([
+    { name: 'Bob', points: 194 },
+    { name: 'Alice', points: 162 },
+  ])
+  await flushPromises()
+  expect(wrapper.findAll('.global-scores li').map((row) => row.text())).toEqual([
+    'Bob194 pts',
+    'Alice162 pts',
+  ])
+})
+it('loads the saved reroll preference and allows enabling it again', async () => {
+  localStorage.setItem('yatzy.confirmRerolls', 'false')
+  wrapper = mount(App)
+  await flushPromises()
+  const pref = wrapper.get<HTMLInputElement>('.rules input[type=checkbox]')
+  expect(pref.element.checked).toBe(false)
+  await pref.setValue(true)
+  expect(localStorage.getItem('yatzy.confirmRerolls')).toBe('true')
 })

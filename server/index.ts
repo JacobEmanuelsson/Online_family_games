@@ -1,4 +1,6 @@
 import { allowedOrigins, clientAddress, fixedWindow } from './security'
+import { openLeaderboard } from './leaderboard'
+import type { Config } from '@libsql/client'
 import staticFiles from '@fastify/static'
 import { fileURLToPath } from 'node:url'
 import Fastify from 'fastify'
@@ -8,10 +10,11 @@ import { Server } from 'socket.io'
 import { createRoom, joinRoom, leaveRoom, snapshot, gameAction } from './room'
 
 // Exporting the factory lets integration tests run an isolated server on a free port.
-export async function buildServer() {
+export async function buildServer(database: Config = { url: ':memory:' }) {
   const app = Fastify({ logger: true })
   const production = process.env.NODE_ENV === 'production'
   const origins = allowedOrigins(production, process.env.PUBLIC_ORIGIN ?? (process.env.RENDER === 'true' ? process.env.RENDER_EXTERNAL_URL : undefined))
+  const leaderboard = await openLeaderboard(database)
   const handshakeAllowed = fixedWindow(60, 60_000)
   const joinAllowed = fixedWindow(20, 60_000)
   const createAllowed = fixedWindow(8, 60_000)
@@ -54,6 +57,7 @@ export async function buildServer() {
     const previous = connections.get(playerId)
     if (previous) io.sockets.sockets.get(previous)?.disconnect(true)
     connections.set(playerId, socket.id)
+    socket.emit('leaderboard:updated', leaderboard.top())
     socket.emit('session:ready', { playerId })
 
     async function enter(action: 'create' | 'join', code: unknown, name: unknown, reply: unknown) {
@@ -95,12 +99,13 @@ export async function buildServer() {
       void enter('join', code, name, reply)
     })
     for (const action of ['start', 'roll', 'score', 'rematch']) {
-      socket.on(`game:${action}`, (payload: unknown, reply: unknown) => {
+      socket.on(`game:${action}`, async (payload: unknown, reply: unknown) => {
         if (typeof reply !== 'function') return
         try {
           if (!payload || typeof payload !== 'object') throw new Error('Invalid move.')
           const { version, value } = payload as { version?: unknown; value?: unknown }
-          const room = gameAction(socket.data.roomCode, playerId, action, version, value)
+          const room = await gameAction(socket.data.roomCode, playerId, action, version, value, leaderboard.record)
+          if (action === 'score' && room.game?.finished) io.emit('leaderboard:updated', leaderboard.top())
           const data = snapshot(room)
           reply(data)
           io.to(room.code).emit('room:updated', data)
@@ -117,6 +122,7 @@ export async function buildServer() {
   })
   app.addHook('onClose', async () => {
     io.close()
+    leaderboard.close()
   })
   return { app, io }
 }

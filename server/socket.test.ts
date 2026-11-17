@@ -104,6 +104,7 @@ it('plays a complete multiplayer match, recovers a seat, and starts a rematch', 
   expect(state.game.dice[0]).toBe(firstDie)
   const extra = await connect()
   expect((await request(extra, 'room:join', state.code, 'Clara')).error).toContain('started')
+  const received = new Promise(resolve => extra.once('leaderboard:updated', resolve))
   for (const category of categories) {
     for (const socket of [returned, guest]) {
       if (state.game.rollsLeft === 3)
@@ -113,11 +114,14 @@ it('plays a complete multiplayer match, recovers a seat, and starts a rematch', 
         })
       const id = state.game.players[state.game.currentPlayerIndex].id
       const expected = state.previews[category]
-      state = await request(socket, 'game:score', { version: state.version, value: category })
+      state = await request(socket, 'game:score', { version: state.version, value: category, points: 999999, totals: { [id]: 999999 } })
       expect(state.error).toBeUndefined()
       expect(state.game.scorecards[id][category]).toBe(expected)
     }
   }
+  expect(await received).toEqual(state.players.map((p: { id: string; name: string }) => ({
+    name: p.name, points: state.totals[p.id],
+  })).sort((a: {points:number}, b: {points:number}) => b.points - a.points))
   expect(state.game.finished).toBe(true)
   expect(state.winnerIds.length).toBeGreaterThan(0)
   for (const id of [hostId, guestId]) {
